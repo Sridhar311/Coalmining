@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Coal Mine Gas Monitor — Live Dashboard</title>
+    <meta name="description" content="Real-time coal mine gas sensor monitoring via NodeMCU WiFi" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⛏️</text></svg>" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      /* ── Design Tokens ─────────────────────────────────────────────────── */
+      :root {
+        --bg:          #050c16;
+        --panel:       #0d1826;
+        --panel2:      #111f30;
+        --border:      rgba(255,255,255,0.07);
+        --accent:      #00d4ff;
+        --accent-dim:  rgba(0,212,255,0.15);
+        --safe:        #22d86e;
+        --safe-dim:    rgba(34,216,110,0.15);
+        --danger:      #ff4d4f;
+        --danger-dim:  rgba(255,77,79,0.15);
+        --warn:        #ffc53d;
+        --warn-dim:    rgba(255,197,61,0.15);
+        --text:        #e8f0f8;
+        --text-muted:  #6b84a0;
+        --radius:      16px;
+        --radius-sm:   10px;
+        --shadow:      0 30px 80px rgba(0,0,0,0.6);
+      }
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+        background: var(--bg);
+        background-image:
+          radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0,212,255,0.08) 0%, transparent 60%),
+          radial-gradient(ellipse 40% 30% at 80% 100%, rgba(34,216,110,0.05) 0%, transparent 50%);
+        color: var(--text);
+        min-height: 100vh;
+        padding: 1.5rem;
+      }
+
+      /* ── Layout ────────────────────────────────────────────────────────── */
+      .shell {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+
+      /* ── Header ────────────────────────────────────────────────────────── */
+      header {
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        margin-bottom: 2rem;
+      }
+      .logo {
+        width: 42px; height: 42px;
+        background: var(--accent-dim);
+        border: 1px solid rgba(0,212,255,0.3);
+        border-radius: 12px;
+        display: grid; place-items: center;
+        font-size: 1.4rem;
+      }
+      header h1 {
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+      }
+      header p {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 0.1rem;
+      }
+      .connection-pill {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.4rem 0.9rem;
+        border-radius: 999px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        border: 1px solid var(--border);
+        background: var(--panel2);
+        transition: all 0.3s;
+      }
+      .connection-pill .dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        transition: all 0.3s;
+      }
+      .connection-pill.live .dot   { background: var(--safe); box-shadow: 0 0 8px var(--safe); animation: pulse 1.5s infinite; }
+      .connection-pill.error .dot  { background: var(--danger); }
+      .connection-pill.live        { border-color: rgba(34,216,110,0.3); color: var(--safe); }
+      .connection-pill.error       { border-color: rgba(255,77,79,0.3); color: var(--danger); }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50%       { opacity: 0.4; }
+      }
+
+      /* ── Alert Banner ──────────────────────────────────────────────────── */
+      #alertBanner {
+        display: none;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.9rem 1.2rem;
+        border-radius: var(--radius-sm);
+        background: var(--danger-dim);
+        border: 1px solid rgba(255,77,79,0.35);
+        margin-bottom: 1.5rem;
+        font-weight: 600;
+        color: #ff7875;
+        animation: flashIn 0.4s ease;
+      }
+      #alertBanner.show { display: flex; }
+      #alertBanner .icon { font-size: 1.4rem; animation: shake 0.5s infinite alternate; }
+      @keyframes shake {
+        0%   { transform: rotate(-8deg); }
+        100% { transform: rotate(8deg); }
+      }
+      @keyframes flashIn {
+        from { opacity: 0; transform: translateY(-8px); }
+        to   { opacity: 1; transform: translateY(0); }
+      }
+
+      /* ── Stat Cards Grid ───────────────────────────────────────────────── */
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.25rem 1.4rem;
+        position: relative;
+        overflow: hidden;
+        transition: border-color 0.35s, box-shadow 0.35s;
+      }
+      .card::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: var(--radius);
+        opacity: 0;
+        transition: opacity 0.35s;
+      }
+      .card.safe-state   { border-color: rgba(34,216,110,0.35); box-shadow: 0 0 30px rgba(34,216,110,0.08); }
+      .card.safe-state::before  { background: var(--safe-dim); opacity: 1; }
+      .card.danger-state { border-color: rgba(255,77,79,0.45); box-shadow: 0 0 30px rgba(255,77,79,0.12); }
+      .card.danger-state::before { background: var(--danger-dim); opacity: 1; }
+
+      .card-label {
+        font-size: 0.72rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        position: relative;
+      }
+      .card-value {
+        font-size: clamp(2rem, 5vw, 3rem);
+        font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1;
+        margin: 0.4rem 0 0.25rem;
+        position: relative;
+        transition: color 0.35s;
+      }
+      .card-sub {
+        font-size: 0.78rem;
+        color: var(--text-muted);
+        position: relative;
+      }
+
+      /* Specific card colours */
+      #gasCard  .card-value { color: var(--accent); }
+      #gasCard.safe-state   .card-value { color: var(--safe); }
+      #gasCard.danger-state .card-value { color: var(--danger); }
+
+      #statusCard .card-value { font-size: clamp(1.2rem, 3vw, 1.6rem); font-weight: 700; }
+      #statusCard.safe-state   .card-value { color: var(--safe); }
+      #statusCard.danger-state .card-value { color: var(--danger); }
+
+      #buzzerCard.danger-state .card-value { color: var(--warn); }
+
+      #updCard .card-value {
+        font-family: "JetBrains Mono", monospace;
+        font-size: clamp(0.95rem, 2vw, 1.2rem);
+        font-weight: 600;
+        color: var(--text-muted);
+      }
+
+      /* ── Chart Panel ───────────────────────────────────────────────────── */
+      .chart-panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.4rem;
+        margin-bottom: 1.5rem;
+      }
+      .chart-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        margin-bottom: 1rem;
+      }
+      .chart-header h2 {
+        font-size: 0.9rem;
+        font-weight: 600;
+        color: var(--text-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+      .chart-header span {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+      canvas { width: 100% !important; max-height: 260px; }
+
+      /* ── Log Panel ─────────────────────────────────────────────────────── */
+      .log-panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        padding: 1.2rem 1.4rem;
+      }
+      .log-panel h2 {
+        font-size: 0.8rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        margin-bottom: 0.8rem;
+      }
+      .log-body {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.8rem;
+        max-height: 160px;
+        overflow-y: auto;
+        line-height: 1.7;
+        color: #6b84a0;
+      }
+      .log-body::-webkit-scrollbar { width: 4px; }
+      .log-body::-webkit-scrollbar-track { background: transparent; }
+      .log-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 99px; }
+      .log-entry { opacity: 0; animation: fadeIn 0.3s forwards; }
+      .log-entry.safe   .tag { color: var(--safe); }
+      .log-entry.danger .tag { color: var(--danger); }
+      .log-entry .ts    { color: rgba(107,132,160,0.6); margin-right: 0.5rem; }
+      @keyframes fadeIn { to { opacity: 1; } }
+
+      /* ── Footer ────────────────────────────────────────────────────────── */
+      footer {
+        text-align: center;
+        margin-top: 1.5rem;
+        font-size: 0.75rem;
+        color: var(--text-muted);
+      }
+
+      /* ── Responsive ────────────────────────────────────────────────────── */
+      @media (max-width: 480px) {
+        body { padding: 1rem; }
+        header h1 { font-size: 1.1rem; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+
+      <!-- Header -->
+      <header>
+        <div class="logo" aria-hidden="true">⛏️</div>
+        <div>
+          <h1>Coal Mine Gas Monitor</h1>
+          <p>Real-time sensor data via NodeMCU WiFi</p>
+        </div>
+        <div id="connPill" class="connection-pill">
+          <span class="dot"></span>
+          <span id="connLabel">Connecting…</span>
+        </div>
+      </header>
+
+      <!-- Danger Banner -->
+      <div id="alertBanner" role="alert" aria-live="assertive">
+        <span class="icon">⚠️</span>
+        <span>TOXIC GAS DETECTED — Evacuate immediately and ventilate the area!</span>
+      </div>
+
+      <!-- Stat Cards -->
+      <div class="cards">
+        <div class="card" id="gasCard">
+          <div class="card-label">Gas Level (ADC)</div>
+          <div class="card-value" id="gasValue">---</div>
+          <div class="card-sub">Threshold: <span id="threshVal">200</span></div>
+        </div>
+
+        <div class="card" id="statusCard">
+          <div class="card-label">Gas Status</div>
+          <div class="card-value" id="statusText">Waiting…</div>
+          <div class="card-sub" id="pctBar"></div>
+        </div>
+
+        <div class="card" id="buzzerCard">
+          <div class="card-label">Buzzer</div>
+          <div class="card-value" id="buzzerText">OFF</div>
+          <div class="card-sub">Active when gas &gt; threshold</div>
+        </div>
+
+        <div class="card" id="updCard">
+          <div class="card-label">Last Update</div>
+          <div class="card-value" id="updText">--:--:--</div>
+          <div class="card-sub" id="agoText">waiting for data</div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>Gas Reading — Last 60 samples</h2>
+          <span id="minMax">Min — / Max —</span>
+        </div>
+        <canvas id="chartCanvas" aria-label="Gas level history chart" role="img"></canvas>
+      </div>
+
+      <!-- Log -->
+      <div class="log-panel">
+        <h2>📋 Event Log</h2>
+        <div class="log-body" id="logBody"></div>
+      </div>
+
+      <footer>
+        NodeMCU → WiFi → <strong>server.js :3000</strong> → this dashboard &nbsp;|&nbsp;
+        Polling every 1 s
+      </footer>
+    </div>
+
+    <script>
+      // ── Config ──────────────────────────────────────────────────────────────
+      // Point this at your server. When opened via the server itself
+      // (http://YOUR_IP:3000) this auto-resolves correctly.
+      const SERVER = window.location.origin;   // e.g. http://192.168.1.5:3000
+      const POLL_MS = 1000;
+
+      // ── DOM refs ─────────────────────────────────────────────────────────────
+      const gasValueEl  = document.getElementById("gasValue");
+      const statusEl    = document.getElementById("statusText");
+      const buzzerEl    = document.getElementById("buzzerText");
+      const updEl       = document.getElementById("updText");
+      const agoEl       = document.getElementById("agoText");
+      const pctEl       = document.getElementById("pctBar");
+      const threshEl    = document.getElementById("threshVal");
+      const alertBanner = document.getElementById("alertBanner");
+      const connPill    = document.getElementById("connPill");
+      const connLabel   = document.getElementById("connLabel");
+      const logBody     = document.getElementById("logBody");
+      const minMaxEl    = document.getElementById("minMax");
+
+      // ── State ─────────────────────────────────────────────────────────────────
+      let chart;
+      let lastTimestamp = null;
+      let consecutiveErrors = 0;
+
+      // ── Chart setup ──────────────────────────────────────────────────────────
+      function setupChart() {
+        const ctx = document.getElementById("chartCanvas").getContext("2d");
+        chart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: [],
+            datasets: [
+              {
+                label: "Gas ADC",
+                data: [],
+                borderColor: "rgba(0,212,255,0.9)",
+                backgroundColor: "rgba(0,212,255,0.08)",
+                fill: true,
+                tension: 0.35,
+                borderWidth: 2.5,
+                pointRadius: 0,
+                pointHoverRadius: 5,
+              },
+              {
+                label: "Threshold",
+                data: [],
+                borderColor: "rgba(255,77,79,0.55)",
+                borderDash: [6,4],
+                borderWidth: 1.5,
+                pointRadius: 0,
+                fill: false,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            animation: false,
+            interaction: { intersect: false, mode: "index" },
+            scales: {
+              x: {
+                ticks: { display: false },
+                grid:  { color: "rgba(255,255,255,0.04)" },
+              },
+              y: {
+                beginAtZero: true,
+                grid:  { color: "rgba(255,255,255,0.04)" },
+                ticks: { color: "#6b84a0", font: { size: 11 } },
+              },
+            },
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                backgroundColor: "rgba(13,24,38,0.95)",
+                borderColor: "rgba(255,255,255,0.1)",
+                borderWidth: 1,
+                titleColor: "#6b84a0",
+                bodyColor: "#e8f0f8",
+              },
+            },
+          },
+        });
+      }
+
+      function pushChart(history, threshold) {
+        const labels = history.map((_, i) => i + 1);
+        const vals   = history.map(h => h.gas);
+
+        chart.data.labels              = labels;
+        chart.data.datasets[0].data   = vals;
+        chart.data.datasets[1].data   = labels.map(() => threshold);
+        chart.update("none");
+
+        const min = Math.min(...vals);
+        const max = Math.max(...vals);
+        minMaxEl.textContent = `Min ${min} / Max ${max}`;
+      }
+
+      // ── UI updaters ──────────────────────────────────────────────────────────
+      function setConnection(state) { // "live" | "error" | "waiting"
+        connPill.className = "connection-pill " + (state === "live" ? "live" : state === "error" ? "error" : "");
+        connLabel.textContent = state === "live" ? "Live" : state === "error" ? "Offline" : "Connecting…";
+      }
+
+      function applyCardState(cardId, isDanger) {
+        const el = document.getElementById(cardId);
+        el.classList.toggle("danger-state", isDanger);
+        el.classList.toggle("safe-state",   !isDanger);
+      }
+
+      function appendLog(message, type = "") {
+        const ts  = new Date().toLocaleTimeString("en-GB");
+        const div = document.createElement("div");
+        div.className = "log-entry " + type;
+        div.innerHTML = `<span class="ts">[${ts}]</span><span class="tag">${message}</span>`;
+        logBody.prepend(div);
+        // keep max 60 entries
+        while (logBody.children.length > 60) logBody.lastChild.remove();
+      }
+
+      function timeSince(isoString) {
+        if (!isoString) return "—";
+        const diff = Math.round((Date.now() - new Date(isoString)) / 1000);
+        if (diff < 5)   return "just now";
+        if (diff < 60)  return `${diff}s ago`;
+        if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+        return `${Math.floor(diff/3600)}h ago`;
+      }
+
+      // ── Main poll loop ───────────────────────────────────────────────────────
+      async function poll() {
+        try {
+          const res  = await fetch(`${SERVER}/data`, { cache: "no-store" });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = await res.json();
+
+          consecutiveErrors = 0;
+          setConnection("live");
+
+          const { gas, buzzer, timestamp, status, history, threshold } = data;
+
+          // Update threshold display
+          threshEl.textContent = threshold;
+
+          // Gas card
+          gasValueEl.textContent = gas !== null ? gas : "---";
+          const isDanger = status === "DANGER";
+          applyCardState("gasCard",    isDanger);
+          applyCardState("statusCard", isDanger);
+          applyCardState("buzzerCard", buzzer);
+
+          // Status card
+          statusEl.textContent = gas !== null ? status : "Waiting…";
+          const pct = gas !== null ? Math.min(100, Math.round((gas / threshold) * 100)) : 0;
+          pctEl.textContent = gas !== null ? `${pct}% of threshold` : "";
+
+          // Buzzer
+          buzzerEl.textContent = buzzer ? "🔔 ON" : "OFF";
+
+          // Update time
+          if (timestamp) {
+            const d = new Date(timestamp);
+            updEl.textContent = d.toLocaleTimeString("en-GB");
+            agoEl.textContent = timeSince(timestamp);
+          }
+
+          // Alert banner
+          alertBanner.classList.toggle("show", isDanger);
+
+          // Chart
+          if (history && history.length) pushChart(history, threshold);
+
+          // Log only on new data
+          if (timestamp && timestamp !== lastTimestamp) {
+            lastTimestamp = timestamp;
+            if (gas !== null) {
+              appendLog(`Gas = ${gas}  |  ${status}  |  Buzzer: ${buzzer ? "ON" : "OFF"}`, isDanger ? "danger" : "safe");
+            }
+          }
+
+        } catch (err) {
+          consecutiveErrors++;
+          if (consecutiveErrors === 1) appendLog(`Server unreachable: ${err.message}`, "danger");
+          if (consecutiveErrors >= 3) setConnection("error");
+        }
+      }
+
+      // ── Boot ─────────────────────────────────────────────────────────────────
+      setupChart();
+      setConnection("waiting");
+      appendLog("Dashboard ready — waiting for NodeMCU data…");
+      poll();
+      setInterval(poll, POLL_MS);
+      // also refresh the "ago" counter every 5 s without a full fetch
+      setInterval(() => {
+        if (lastTimestamp) agoEl.textContent = timeSince(lastTimestamp);
+      }, 5000);
+    </script>
+  </body>
+</html>
