@@ -21,7 +21,7 @@ let state = {
   history: [],          // last 120 readings
 };
 
-const GAS_THRESHOLD = 200;   // same as frontend threshold
+const GAS_THRESHOLD = 100;   // same as frontend threshold
 const MAX_HISTORY   = 120;
 
 // ── CORS — allow the NodeMCU and local HTML file to reach this server ─────────

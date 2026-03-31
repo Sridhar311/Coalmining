@@ -22,13 +22,13 @@
 // ──────────────────────────────────────────────────────────────────────────────
 const char* WIFI_SSID     = "Sridhar";
 const char* WIFI_PASSWORD = "Sridhar31";
-const char* SERVER_IP     = "10.92.176.32";
+const char* SERVER_IP     = "10.50.111.32";
 const int   SERVER_PORT   = 3000;
 // ──────────────────────────────────────────────────────────────────────────────
 
 const int   GAS_PIN       = A0;       // analog pin
-const int   BUZZER_PIN    = D2;       // digital pin (GPIO 4)
-const int   GAS_THRESHOLD = 200;      // ADC value — adjust for your sensor
+const int   BUZZER_PIN    = D6;       // digital pin (GPIO 12) — red wire on D6
+const int   GAS_THRESHOLD = 100;      // ADC value — adjust for your sensor
 const int   SEND_INTERVAL = 2000;     // ms between HTTP sends
 
 unsigned long lastSend = 0;
@@ -40,6 +40,14 @@ void setup() {
   digitalWrite(BUZZER_PIN, LOW);
 
   Serial.println("\n[Boot] Coal Mine Gas Monitor");
+
+  // ── Clear stale WiFi cache (fixes most ESP8266 connection issues) ──
+  WiFi.persistent(false);   // don't save credentials to flash
+  WiFi.disconnect(true);    // disconnect and clear old config
+  WiFi.mode(WIFI_OFF);
+  delay(1000);
+  WiFi.mode(WIFI_STA);
+  delay(500);
 
   // Scan and list visible WiFi networks
   Serial.println("[WiFi] Scanning for networks...");
@@ -54,9 +62,9 @@ void setup() {
   }
   Serial.println();
 
-  // Connect to WiFi
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  // Connect to WiFi — using BSSID for reliable connection
+  uint8_t bssid[6] = {0x6a, 0x5d, 0x01, 0x50, 0x0d, 0xda};  // Sridhar hotspot MAC
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD, 0, bssid);
   Serial.print("[WiFi] Connecting to: ");
   Serial.println(WIFI_SSID);
 
